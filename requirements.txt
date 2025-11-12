@@ -1,0 +1,17 @@
+flask
+flask-socketio
+eventlet
+python-dotenv
+google-cloud-speech
+google-cloud-texttospeech
+google-cloud-translate
+librosa
+openai
+redis
+langchain
+langchain-openai
+langchain-google-genai
+langchain-core
+langchain-anthropic
+spitch
+torch
