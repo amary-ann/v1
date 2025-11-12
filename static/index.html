@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="google" content="notranslate">
+    <title>Real time translation</title>
+    
+    <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    #transcript-log, #translation-log {
+      padding: 10px;
+      border: 1px solid #ccc;
+      height: 100px;
+      overflow-y: auto;
+      margin-bottom: 10px;
+      background: #f9f9f9;
+    }
+    .status { color: green; font-weight: bold; }
+  </style>
+</head>
+<body>
+    <h1>Real Time Translation</h1>
+    <label for="source-lang">From:</label>
+    <select id="source-lang">
+        <option value="en-US" selected>English (US)</option>
+        <option value="fr-FR">French (FR)</option>
+        <option value="yo">Yoruba</option>
+        <option value="ig">Igbo</option>
+        <option value="ha">Hausa</option>
+    </select>
+
+    <label for="target-lang">To:</label>
+    <select id="target-lang">
+        <option value="fr" selected>French</option>
+        <option value="en">English</option>
+        <option value="es">Spanish</option>
+        <option value="zh">Chinese</option>
+        <option value="de">German</option>
+        <option value="ar">Arabic</option>
+        <option value="hi">Hindi</option>
+        <option value="yo">Yoruba</option>
+        <option value="ig">Igbo</option>
+        <option value="ha">Hausa</option>
+    </select>
+
+    <br><br>
+
+    <button id="start-recording" disabled>Start Recording</button>
+    <button id="stop-recording" disabled>Stop Recording</button>
+    <p class="status" id="status-msg">Connecting...</p>
+    <p><strong>Transcript:</strong> <span id="transcript"></span></p>
+    <p><strong>Translated Text:</strong> <span id="translated-text"></span></p>
+    <audio id="audio-player" controls></audio>
+
+    <script src="https://cdn.socket.io/3.1.3/socket.io.min.js"></script>
+    <script src="https://cdn.webrtc-experiment.com/RecordRTC.js"></script>
+    <script>
+
+        const sourceLangSelect = document.getElementById('source-lang');
+        const targetLangSelect = document.getElementById('target-lang');
+        
+        const startBtn = document.getElementById('start-recording');
+        const stopBtn = document.getElementById('stop-recording');
+        const transcriptEl = document.getElementById('transcript');
+        const translatedTextEl = document.getElementById('translated-text');
+        const audioPlayer = document.getElementById('audio-player');
+        const statusMsg = document.getElementById('status-msg');
+
+        const socket = io('http://127.0.0.1:5000',{
+            transports: ['websocket'],
+            withCredentials: false
+        });
+
+        let stream;
+        let isRecording = false;
+
+        socket.on('connect', () => {
+            if (!isRecording) {
+            startBtn.disabled = false;
+        }
+        statusMsg.textContent = "Connected. Ready to record.";
+        });
+
+        async function recordChunk() {
+            const recorder = RecordRTC(stream, {
+                type: 'audio',
+                mimeType: 'audio/wav',
+                desiredSampRate: 16000,
+                numberOfAudioChannels: 1,
+                recorderType: StereoAudioRecorder
+            });
+
+            recorder.startRecording();
+
+            setTimeout(() => {
+                recorder.stopRecording(() => {
+                    try{
+                    recorder.getDataURL(dataURL => {
+                        if (dataURL.includes("base64,")) {
+                            console.log("Sending source_lang:", sourceLangSelect.value);
+                            console.log("Sending target_lang:", targetLangSelect.value);
+                            console.log("Base64 audio size:", dataURL.length);
+                            socket.emit('message', {
+                                audio: { dataURL },
+                                source_lang: sourceLangSelect.value,
+                                target_lang: targetLangSelect.value
+                            });
+                        }
+                        console.log("isRecording:", isRecording);
+                        if (isRecording) {
+                            recordChunk(); // continue recording loop
+                        }
+                    });
+                }catch(error){
+                    console.error("Error in getDataURL or recordChunk loop:", error);
+                }
+                });
+            }, 2000); // 2-second chunks
+            console.log("Chunk sent");
+        }
+
+        startBtn.onclick = () => {
+            startBtn.disabled = true;
+            stopBtn.disabled = false;
+            isRecording = true;
+
+             // Clear logs for new session
+            transcriptEl.textContent = '';
+            translatedTextEl.textContent = '';
+            statusMsg.textContent = "Recording...";
+
+            navigator.mediaDevices.getUserMedia({ audio: true })
+                .then(s => {
+                    stream = s;
+                    recordChunk();
+                })
+                .catch(error => {
+                    console.error('Error accessing microphone:', error);
+                });
+        };
+
+        stopBtn.onclick = () => {
+            stopBtn.disabled = true;
+            startBtn.disabled = false;
+            isRecording = false;
+            statusMsg.textContent = "Stopped recording.";
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+            }
+        };
+
+        socket.on('results', data => {
+            if (data.transcript) transcriptEl.textContent = data.transcript ;
+            if (data.translated_text) translatedTextEl.textContent = data.translated_text
+
+            if (data.audio_data_url) {
+                audioPlayer.src = data.audio_data_url;
+                audioPlayer.play();
+            }
+        });
+
+        socket.on('disconnect', (reason) => {console.warn("Socket disconnected:", reason);
+    statusMsg.textContent = "Disconnected: " + reason;});
+
+        socket.on('error', data => {
+            console.error('Error:', data.message);
+            statusMsg.textContent = "Error: " + data.message;
+            statusMsg.style.color = "red";
+        });
+
+        socket.on("connect_error", (err) => {
+  console.error("Connection failed:", err);
+});
+
+    </script>
+</body>
+</html>
